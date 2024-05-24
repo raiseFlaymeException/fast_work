@@ -6,21 +6,17 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#if defined(_WIN32) || defined (_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
 #include <winsock2.h>
 #else
 #error "not implemented"
 #endif
 
-// listener and conn not on the same struct to differenciate them and maybe later seperate them due
-// to internal reason
+typedef struct sockaddr_in FwAddr;
+
 typedef struct {
-    SOCKET             sock;
-    struct sockaddr_in addr;
-} FwListener;
-typedef struct {
-    SOCKET             sock;
-    struct sockaddr_in addr;
+    SOCKET sock;
+    FwAddr addr;
 } FwConn;
 
 ///
@@ -36,15 +32,17 @@ bool fw_init(void);
 ///
 bool fw_quit(void);
 
+// NOLINTBEGIN
+
 ///
-/// @brief listen for an incomming connection
+/// @brief bind and listen incomming connection
 ///
 /// @param[out] listener the listener to create
 /// @param[in] addr the address to connect to (ip address or host name)
 /// @param[in] port the port to connect to
 /// @return true if not failed otherwise false
 ///
-bool fw_listen(FwListener *listener, const char *addr, unsigned short port);
+bool FwConn_TCP_create_listener(FwConn *listener, const char *addr, unsigned short port);
 ///
 /// @brief connect to a listener
 ///
@@ -53,9 +51,8 @@ bool fw_listen(FwListener *listener, const char *addr, unsigned short port);
 /// @param[in] port the port to connect to
 /// @return true if not failed otherwise false
 ///
-bool fw_connect(FwConn *conn, const char *addr, unsigned short port);
+bool FwConn_TCP_create_conn(FwConn *conn, const char *addr, unsigned short port);
 
-// NOLINTBEGIN
 ///
 /// @brief accept the next incoming connection (blocking)
 ///
@@ -63,15 +60,7 @@ bool fw_connect(FwConn *conn, const char *addr, unsigned short port);
 /// @param[out] conn the connection we get
 /// @return true if not failed otherwise false
 ///
-bool FwListener_accept(FwListener *listener, FwConn *conn);
-
-///
-/// @brief close the listener
-///
-/// @param[in, out] listener the listener to close
-/// @return true if not failed otherwise false
-///
-bool FwListener_close(FwListener *listener);
+bool FwConn_TCP_accept(FwConn *listener, FwConn *conn);
 
 ///
 /// @brief send data to a socket
@@ -81,7 +70,7 @@ bool FwListener_close(FwListener *listener);
 /// @param[in] msg_size the size of the message to send
 /// @return true if not failed otherwise false
 ///
-bool FwConn_send(FwConn *conn, const char *msg, size_t msg_size);
+bool FwConn_TCP_send(FwConn *conn, const char *msg, size_t msg_size);
 
 ///
 /// @brief check if we can call recv during max usec_timeout micro seconds
@@ -91,8 +80,7 @@ bool FwConn_send(FwConn *conn, const char *msg, size_t msg_size);
 /// @param[in] usec_timeout the maximum time to wait in micro seconds
 /// @return true if not failed othewise false
 ///
-bool FwConn_check_timeout(FwConn *conn, bool *result, size_t usec_timeout);
-
+bool FwConn_TCP_check_timeout(FwConn *conn, bool *result, size_t usec_timeout);
 ///
 /// @brief receive a message of a certain length from the connection (block)
 ///
@@ -102,7 +90,7 @@ bool FwConn_check_timeout(FwConn *conn, bool *result, size_t usec_timeout);
 /// msg_size and the buffer won't be zeroed out
 /// @return true if not failed otherwise false
 ///
-bool FwConn_recv(FwConn *conn, char *msg, size_t msg_size);
+bool FwConn_TCP_recv(FwConn *conn, char *msg, size_t msg_size);
 ///
 /// @brief receive a message of any length from the connection (block)
 ///
@@ -113,11 +101,10 @@ bool FwConn_recv(FwConn *conn, char *msg, size_t msg_size);
 /// @param[in] cap the capacity of the vector (put an estimate of the size of the data received)
 /// @return true if not failed othewise false
 ///
-bool FwConn_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap);
-///
+bool FwConn_TCP_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap);
 /// @brief receive a message of any length from the connection (block)
-/// call FwConn_recv_all_cap with the capacity equal to FW_BUF_SIZE_RECV_ALL (see
-/// FwConn_recv_all_cap and FW_BUF_SIZE_RECV_ALL)
+/// call FwConnTCP_recv_all_cap with the capacity equal to FW_BUF_SIZE_RECV_ALL (see
+/// FwConnTCP_recv_all_cap and FW_BUF_SIZE_RECV_ALL)
 ///
 /// @param[in, out] conn the connection to receive from
 /// @param[out] msg a pointer to a char * that will be allocated (and will need to be free) and will
@@ -125,36 +112,50 @@ bool FwConn_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap)
 /// @param[out] msg_size the message size read from the function
 /// @return true if not failed othewise false
 ///
-bool FwConn_recv_all(FwConn *conn, char **msg, size_t *msg_size);
+bool FwConn_TCP_recv_all(FwConn *conn, char **msg, size_t *msg_size);
+
+bool FwConn_UDP_bind(FwConn *server, const char *addr, unsigned short port);
+
+bool FwConn_UDP_create_conn(FwConn *conn);
+bool FwConn_UDP_create_addr(FwAddr *addr, const char *address, unsigned short port);
+
+bool FwConn_UDP_send_to(FwConn *conn, FwAddr *addr_to, const char *msg, size_t msg_size);
+
+bool FwConn_UDP_recv_from(FwConn *conn, FwAddr *addr_from, char *msg, size_t msg_size);
+bool FwConn_UDP_recv_all_cap_from(FwConn *conn, FwAddr *addr_from, char **msg, size_t *msg_size,
+                                  size_t cap);
+bool FwConn_UDP_recv_all_from(FwConn *conn, FwAddr *addr_from, char **msg, size_t *msg_size);
+
+///
+/// @brief close the listener
+///
+/// @param[in, out] listener the listener to close
+/// @return true if not failed otherwise false
+///
+bool FwConn_close(FwConn *listener);
 
 ///
 /// @brief get the ip address of the connection
 ///
-/// @param[in, out] conn the connection to get the ip from
+/// @param[in, out] address the address to get the ip from
 /// @param[out] addr a pointer to a char * that will be allocated (and will need to be free) and
 /// will hold the ip adress
 /// @param[out] addr_size the size of the allocated char *
 /// @return true if not failed otherwise false
 ///
-bool FwConn_get_addr(FwConn *conn, char **addr, size_t *addr_size);
+bool FwAddr_get_addr(FwAddr *address, char **addr, size_t *addr_size);
 ///
 /// @brief get the port of the connection
 ///
-/// @param[in, out] conn the connection to get the port from
+/// @param[in, out] address the connection to get the port from
 /// @return the port (can't failed so no error code)
 ///
-unsigned short FwConn_get_port(FwConn *conn);
+unsigned short FwAddr_get_port(FwAddr *address);
 
-///
-/// @brief close the connection
-///
-/// @param[in, out] conn the connection to close
-/// @return true if not failed otherwise false
-///
-bool FwConn_close(FwConn *conn);
 // NOLINTEND
 
 #endif // FW_H
+#define FW_IMPL
 #ifdef FW_IMPL
 
 #ifndef FW_BUF_SIZE_RECV_ALL
@@ -163,11 +164,23 @@ bool FwConn_close(FwConn *conn);
 
 #define FW_USEC_TO_SEC_DIV (size_t)1e6
 
-
 static bool impl_fw_resolve(const char *addr, unsigned long *result) {
     struct hostent *host = gethostbyname(addr);
     if (host == NULL || *host->h_addr_list == NULL) { return false; }
     *result = (*(struct in_addr *)(host->h_addr)).s_addr;
+    return true;
+}
+static bool impl_fw_TCP_create_socket(FwConn *conn, const char *addr, // NOLINT
+                                      unsigned short port) {
+    conn->sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (conn->sock == INVALID_SOCKET) { return false; }
+
+    memset(&conn->addr, 0, sizeof(conn->addr));
+
+    if (!impl_fw_resolve(addr, &conn->addr.sin_addr.s_addr)) { return false; }
+
+    conn->addr.sin_family = AF_INET;
+    conn->addr.sin_port   = htons(port);
     return true;
 }
 
@@ -177,16 +190,8 @@ bool fw_init(void) {
 }
 bool fw_quit(void) { return WSACleanup() == 0; }
 
-bool fw_listen(FwListener *listener, const char *addr, unsigned short port) {
-    listener->sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener->sock == INVALID_SOCKET) { return false; }
-
-    memset(&listener->addr, 0, sizeof(listener->addr));
-
-    if (!impl_fw_resolve(addr, &listener->addr.sin_addr.s_addr)) { return false; }
-
-    listener->addr.sin_family = AF_INET;
-    listener->addr.sin_port   = htons(port);
+bool FwConn_TCP_create_listener(FwConn *listener, const char *addr, unsigned short port) {
+    if (!impl_fw_TCP_create_socket(listener, addr, port)) { return false; }
 
     if (bind(listener->sock, (struct sockaddr *)&listener->addr, sizeof(listener->addr)) != 0) {
         closesocket(listener->sock);
@@ -199,16 +204,8 @@ bool fw_listen(FwListener *listener, const char *addr, unsigned short port) {
     }
     return true;
 }
-bool fw_connect(FwConn *conn, const char *addr, unsigned short port) {
-    conn->sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (conn->sock == INVALID_SOCKET) { return false; }
-
-    memset(&conn->addr, 0, sizeof(conn->addr));
-
-    if (!impl_fw_resolve(addr, &conn->addr.sin_addr.s_addr)) { return false; }
-
-    conn->addr.sin_family = AF_INET;
-    conn->addr.sin_port   = htons(port);
+bool FwConn_TCP_create_conn(FwConn *conn, const char *addr, unsigned short port) {
+    if (!impl_fw_TCP_create_socket(conn, addr, port)) { return false; }
 
     if (connect(conn->sock, (struct sockaddr *)&conn->addr, sizeof(conn->addr)) != 0) {
         closesocket(conn->sock);
@@ -217,23 +214,22 @@ bool fw_connect(FwConn *conn, const char *addr, unsigned short port) {
     return true;
 }
 
-bool FwListener_accept(FwListener *listener, FwConn *conn) {
+bool FwConn_TCP_accept(FwConn *listener, FwConn *conn) {
     int addrlen = sizeof(conn->addr);
     conn->sock  = accept(listener->sock, (struct sockaddr *)&conn->addr, &addrlen);
     return conn->sock != INVALID_SOCKET;
 }
-bool FwListener_close(FwListener *listener) { return closesocket(listener->sock) == 0; }
 
-bool FwConn_send(FwConn *conn, const char *msg, size_t msg_size) {
+bool FwConn_TCP_send(FwConn *conn, const char *msg, size_t msg_size) {
     return send(conn->sock, msg, msg_size, 0) != SOCKET_ERROR;
 }
 
-bool FwConn_check_timeout(FwConn *conn, bool *result, size_t usec_timeout) {
+bool FwConn_TCP_check_timeout(FwConn *conn, bool *result, size_t usec_timeout) {
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(conn->sock, &readfds);
 
-    TIMEVAL timeout;
+    struct timeval timeout;
     timeout.tv_sec  = usec_timeout / FW_USEC_TO_SEC_DIV;
     timeout.tv_usec = usec_timeout % FW_USEC_TO_SEC_DIV;
 
@@ -242,10 +238,10 @@ bool FwConn_check_timeout(FwConn *conn, bool *result, size_t usec_timeout) {
     *result = n_sock_read == 1;
     return true;
 }
-bool FwConn_recv(FwConn *conn, char *msg, size_t msg_size) {
+bool FwConn_TCP_recv(FwConn *conn, char *msg, size_t msg_size) {
     return recv(conn->sock, msg, msg_size, 0) != SOCKET_ERROR;
 }
-bool FwConn_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap) {
+bool FwConn_TCP_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap) {
     assert(cap > 0);
     *msg      = malloc(cap);
     *msg_size = 0;
@@ -262,12 +258,86 @@ bool FwConn_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap)
 
     return byte_read == 0;
 }
-bool FwConn_recv_all(FwConn *conn, char **msg, size_t *msg_size) {
-    return FwConn_recv_all_cap(conn, msg, msg_size, FW_BUF_SIZE_RECV_ALL);
+bool FwConn_TCP_recv_all(FwConn *conn, char **msg, size_t *msg_size) {
+    return FwConn_TCP_recv_all_cap(conn, msg, msg_size, FW_BUF_SIZE_RECV_ALL);
 }
 
-bool FwConn_get_addr(FwConn *conn, char **addr, size_t *addr_size) {
-    char *internal_addr = inet_ntoa(conn->addr.sin_addr);
+bool FwConn_UDP_bind(FwConn *server, const char *addr, unsigned short port) {
+    if (!FwConn_UDP_create_conn(server)) { return false; }
+    if (!FwConn_UDP_create_addr(&server->addr, addr, port)) { return false; }
+
+    if (bind(server->sock, (struct sockaddr *)&server->addr, sizeof(server->addr)) != 0) {
+        closesocket(server->sock);
+        return false;
+    }
+    return true;
+}
+bool FwConn_UDP_create_conn(FwConn *conn) {
+    conn->sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (conn->sock == INVALID_SOCKET) { return false; }
+    return true;
+}
+bool FwConn_UDP_create_addr(FwAddr *address, const char *addr, unsigned short port) {
+    memset(address, 0, sizeof(*address));
+
+    if (!impl_fw_resolve(addr, &address->sin_addr.s_addr)) { return false; }
+
+    address->sin_family = AF_INET;
+    address->sin_port   = htons(port);
+
+    return true;
+}
+
+bool FwConn_UDP_send_to(FwConn *conn, FwAddr *addr_to, const char *msg, size_t msg_size) {
+    return sendto(conn->sock, msg, msg_size, 0, (struct sockaddr *)addr_to, sizeof(*addr_to)) !=
+           SOCKET_ERROR;
+}
+
+bool FwConn_UDP_recv_from(FwConn *conn, FwAddr *addr_from, char *msg, size_t msg_size) {
+    if (addr_from == NULL) {
+        return recvfrom(conn->sock, msg, msg_size, 0, NULL, NULL) != SOCKET_ERROR;
+    }
+    int fromlen = sizeof(*addr_from);
+    return recvfrom(conn->sock, msg, msg_size, 0, (struct sockaddr *)addr_from, &fromlen) !=
+           SOCKET_ERROR;
+}
+bool FwConn_UDP_recv_all_cap_from(FwConn *conn, FwAddr *addr_from, char **msg, size_t *msg_size,
+                                  size_t cap) {
+    assert(cap > 0);
+    *msg      = malloc(cap);
+    *msg_size = 0;
+
+    int fromlen = sizeof(*addr_from);
+
+    int recv_from_len = -1;
+    while (recv_from_len == -1) {
+        recv_from_len =
+            recvfrom(conn->sock, *msg, cap, MSG_PEEK, (struct sockaddr *)addr_from, &fromlen);
+
+        int err = WSAGetLastError();
+        if (err && err != WSAEMSGSIZE) {
+            printf("ERROR: %d", err);
+            return false;
+        }
+        WSASetLastError(err); // put pack the error
+
+        if (recv_from_len == -1) {
+            cap *= 2;
+            *msg = realloc(*msg, cap);
+        }
+    }
+    *msg_size = recv_from_len;
+    return recvfrom(conn->sock, *msg, *msg_size, 0, (struct sockaddr *)addr_from, &fromlen) !=
+           SOCKET_ERROR;
+}
+bool FwConn_UDP_recv_all_from(FwConn *conn, FwAddr *addr_from, char **msg, size_t *msg_size) {
+    return FwConn_UDP_recv_all_cap_from(conn, addr_from, msg, msg_size, FW_BUF_SIZE_RECV_ALL);
+}
+
+bool FwConn_close(FwConn *conn) { return closesocket(conn->sock) == 0; }
+
+bool FwAddr_get_addr(FwAddr *address, char **addr, size_t *addr_size) {
+    char *internal_addr = inet_ntoa(address->sin_addr);
     if (internal_addr == NULL) { return false; }
 
     *addr_size = strlen(internal_addr);
@@ -276,8 +346,6 @@ bool FwConn_get_addr(FwConn *conn, char **addr, size_t *addr_size) {
 
     return true;
 }
-unsigned short FwConn_get_port(FwConn *conn) { return ntohs(conn->addr.sin_port); }
+unsigned short FwAddr_get_port(FwAddr *address) { return ntohs(address->sin_port); }
 
-bool FwConn_close(FwConn *conn) { return closesocket(conn->sock) == 0; }
-
-#endif // FW_IMPL
+#endif //
