@@ -1,6 +1,0 @@
--std=c11
--Isrc/include
--Wall
--Wextra
--Werror
--ferror-limit=0
