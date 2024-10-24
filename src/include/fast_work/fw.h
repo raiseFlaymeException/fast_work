@@ -1,8 +1,6 @@
 #ifndef FW_H
 #define FW_H
 
-// TODO: UDP recv all
-
 #include <stdbool.h>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -386,19 +384,17 @@ bool FwConn_UDP_recv_all_cap_from(FwConn *conn, FwAddr *addr_from, char **msg, s
     if (!*msg) { return false; }
     *msg_size = 0;
 
-    int fromlen = sizeof(*addr_from);
+    int  fromlen  = sizeof(*addr_from);
+    int *pfromlen = (addr_from) ? &fromlen : NULL;
 
     int recv_from_len = -1;
     while (recv_from_len == -1) {
         recv_from_len =
-            recvfrom(conn->sock, *msg, cap, MSG_PEEK, (struct sockaddr *)addr_from, &fromlen);
+            recvfrom(conn->sock, *msg, cap, MSG_PEEK, (struct sockaddr *)addr_from, pfromlen);
 
         int err = WSAGetLastError();
-        if (err && err != WSAEMSGSIZE) {
-            WSASetLastError(err); // put pack the error
-            return false;
-        }
-        WSASetLastError(err);     // put pack the error
+        WSASetLastError(err); // put back the error
+        if (err && err != WSAEMSGSIZE) { return false; }
 
         if (recv_from_len == -1) {
             cap <<= 1;
@@ -407,7 +403,7 @@ bool FwConn_UDP_recv_all_cap_from(FwConn *conn, FwAddr *addr_from, char **msg, s
         }
     }
     *msg_size = recv_from_len;
-    return recvfrom(conn->sock, *msg, *msg_size, 0, (struct sockaddr *)addr_from, &fromlen) !=
+    return recvfrom(conn->sock, *msg, *msg_size, 0, (struct sockaddr *)addr_from, pfromlen) !=
            SOCKET_ERROR;
 }
 bool FwConn_UDP_recv_all_from(FwConn *conn, FwAddr *addr_from, char **msg, size_t *msg_size) {

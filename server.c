@@ -85,22 +85,20 @@ int udp() {
     }
 
     FwAddr client_addr;
-    char *msg_recv;
+    char  *msg_recv;
     size_t msg_recv_size;
     if (!FwConn_UDP_recv_all_cap_from(&server, &client_addr, &msg_recv, &msg_recv_size, 1)) {
-        printf("error receiving message from client (error: %d)\n", WSAGetLastError());
+        printf("error receiving message from client (error: %d)\n", fw_get_error_code());
         return 1;
     }
+
     //       or
     // FwAddr client_addr;
     // char   msg[BUF_SIZE] = {0};
     // if (!FwConn_UDP_recv_from(&server, &client_addr, msg, BUF_SIZE)) {
-    //     printf("Failed to recv message (error: %d)\n", WSAGetLastError());
+    //     printf("Failed to recv message (error: %d)\n", fw_get_error_code());
     //     return 1;
     // }
-
-    printf("client send: %.*s\n", msg_recv_size, msg_recv);
-    free(msg_recv);
 
     char  *addr;
     size_t addr_size;
@@ -108,8 +106,10 @@ int udp() {
         printf("Failed to get the address of client\n");
         return 1;
     }
-    printf("Client connected from: %.*s:%d\n", addr_size, addr, FwAddr_get_port(&client_addr));
+    printf("client %.*s:%d send: %.*s\n", addr_size, addr, FwAddr_get_port(&client_addr),
+           msg_recv_size, msg_recv);
     free(addr);
+    free(msg_recv);
 
     const char *msg_send = "World";
     if (!FwConn_UDP_send_to(&server, &client_addr, msg_send, strlen(msg_send))) {
