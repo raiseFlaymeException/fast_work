@@ -184,7 +184,7 @@ unsigned short FwAddr_get_port(FwAddr *address);
 // NOLINTEND
 
 #endif // FW_H
-#define FW_IMPL
+// #define FW_IMPL
 #ifdef FW_IMPL
 
 #ifndef FW_BUF_SIZE_RECV_ALL
