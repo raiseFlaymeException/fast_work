@@ -1,10 +1,9 @@
 #ifndef FW_H
 #define FW_H
 
-#include <assert.h>
+// TODO: UDP recv all
+
 #include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <winsock2.h>
@@ -19,6 +18,21 @@ typedef struct {
     FwAddr addr;
 } FwConn;
 
+#ifndef FW_ASSERT
+#include <assert.h>
+#define FW_ASSERT(cond, msg) assert(cond &&msg)
+#endif // FW_ASSERT
+
+#ifndef FW_MALLOC
+#include <stdlib.h>
+#define FW_MALLOC(size, elem_size) malloc(size *elem_size)
+#endif // FW_MALLOC
+
+#ifndef FW_REALLOC
+#include <stdlib.h>
+#define FW_REALLOC(addr, size, elem_size) realloc(addr, size *elem_size)
+#endif // FW_MALLOC
+
 ///
 /// @brief initialize the library
 ///
@@ -31,6 +45,21 @@ bool fw_init(void);
 /// @return true if not failed otherwise false
 ///
 bool fw_quit(void);
+
+///
+/// @brief get the error code
+///
+/// @return the error code
+///
+int fw_get_error_code();
+///
+/// @brief get the error msg from the error code
+///
+/// @param error the error code
+/// @param error_size the error size that we got
+/// @return the error message THAT NEED TO BE DEALLOCATED, can be NULL if error
+///
+char *fw_get_error_msg(int error, size_t *error_size);
 
 // NOLINTBEGIN
 
@@ -159,7 +188,7 @@ unsigned short FwAddr_get_port(FwAddr *address);
 #ifdef FW_IMPL
 
 #ifndef FW_BUF_SIZE_RECV_ALL
-#define FW_BUF_SIZE_RECV_ALL 256
+#define FW_BUF_SIZE_RECV_ALL 512
 #endif // FW_BUF_SIZE_RECV_ALL
 
 #define FW_USEC_TO_SEC_DIV (size_t)1e6
@@ -189,6 +218,23 @@ bool fw_init(void) {
     return WSAStartup(MAKEWORD(2, 2), &data) == 0;
 }
 bool fw_quit(void) { return WSACleanup() == 0; }
+
+int   fw_get_error_code() { return WSAGetLastError(); }
+char *fw_get_error_msg(int error, size_t *error_size) {
+    char *local_res = NULL;
+    *error_size     = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (char *)&local_res, 0, NULL);
+
+    // convert allocated pointer of window to allocated pointer of C
+    size_t local_res_size = strlen(local_res);
+    char  *res            = FW_MALLOC(local_res_size, sizeof(*res));
+    memcpy(res, local_res, local_res_size);
+
+    LocalFree(local_res);
+
+    return res;
+}
 
 bool FwConn_TCP_create_listener(FwConn *listener, const char *addr, unsigned short port) {
     if (!impl_fw_TCP_create_socket(listener, addr, port)) { return false; }
@@ -242,21 +288,57 @@ bool FwConn_TCP_recv(FwConn *conn, char *msg, size_t msg_size) {
     return recv(conn->sock, msg, msg_size, 0) != SOCKET_ERROR;
 }
 bool FwConn_TCP_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t cap) {
-    assert(cap > 0);
-    *msg      = malloc(cap);
+    FW_ASSERT(cap > 0, "cap must be > 0 so the msg vector can grow");
+    *msg = FW_MALLOC(cap, sizeof(**msg));
+    if (!*msg) { return false; }
     *msg_size = 0;
 
-    char cur_char;
-    int  byte_read;
-    while ((byte_read = recv(conn->sock, &cur_char, 1, 0)) > 0) {
-        if ((*msg_size) + 1 > cap) {
-            cap *= 2;
-            *msg = realloc(*msg, cap);
+    char    buf[FW_BUF_SIZE_RECV_ALL];
+    ssize_t bytes_read = recv(conn->sock, buf, sizeof(buf), 0);
+
+    unsigned long argp = 1;
+    ioctlsocket(conn->sock, FIONBIO, &argp);
+
+    if (bytes_read != sizeof(buf)) {
+        if (bytes_read == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err != WSAEWOULDBLOCK) { return false; }
         }
-        (*msg)[(*msg_size)++] = cur_char;
+        if (bytes_read > 0) {
+            if ((*msg_size) + bytes_read > cap) {
+                while ((*msg_size) + bytes_read > cap) { cap <<= 1; }
+                *msg = FW_REALLOC(*msg, cap, sizeof(**msg));
+                if (!*msg) { return false; }
+            }
+            memcpy((*msg) + *msg_size, buf, bytes_read);
+            *msg_size += bytes_read;
+        }
+    }
+    while (bytes_read == sizeof(buf)) {
+        if (bytes_read == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK) {
+                break;
+            } else {
+                return false;
+            }
+        }
+        if (bytes_read > 0) {
+            if ((*msg_size) + bytes_read > cap) {
+                while ((*msg_size) + bytes_read > cap) { cap <<= 1; }
+                *msg = FW_REALLOC(*msg, cap, sizeof(**msg));
+                if (!*msg) { return false; }
+            }
+            memcpy((*msg) + *msg_size, buf, bytes_read);
+            *msg_size += bytes_read;
+        }
+        bytes_read = recv(conn->sock, buf, sizeof(buf), 0);
     }
 
-    return byte_read == 0;
+    argp = 0;
+    ioctlsocket(conn->sock, FIONBIO, &argp);
+
+    return true;
 }
 bool FwConn_TCP_recv_all(FwConn *conn, char **msg, size_t *msg_size) {
     return FwConn_TCP_recv_all_cap(conn, msg, msg_size, FW_BUF_SIZE_RECV_ALL);
@@ -303,8 +385,9 @@ bool FwConn_UDP_recv_from(FwConn *conn, FwAddr *addr_from, char *msg, size_t msg
 }
 bool FwConn_UDP_recv_all_cap_from(FwConn *conn, FwAddr *addr_from, char **msg, size_t *msg_size,
                                   size_t cap) {
-    assert(cap > 0);
-    *msg      = malloc(cap);
+    FW_ASSERT(cap > 0, "cap must be > 0 so the msg vector can grow");
+    *msg = FW_MALLOC(cap, sizeof(**msg));
+    if (!*msg) { return false; }
     *msg_size = 0;
 
     int fromlen = sizeof(*addr_from);
@@ -316,14 +399,15 @@ bool FwConn_UDP_recv_all_cap_from(FwConn *conn, FwAddr *addr_from, char **msg, s
 
         int err = WSAGetLastError();
         if (err && err != WSAEMSGSIZE) {
-            printf("ERROR: %d", err);
+            WSASetLastError(err); // put pack the error
             return false;
         }
-        WSASetLastError(err); // put pack the error
+        WSASetLastError(err);     // put pack the error
 
         if (recv_from_len == -1) {
-            cap *= 2;
-            *msg = realloc(*msg, cap);
+            cap <<= 1;
+            *msg = FW_REALLOC(*msg, cap, sizeof(**msg));
+            if (!*msg) { return false; }
         }
     }
     *msg_size = recv_from_len;
@@ -341,7 +425,8 @@ bool FwAddr_get_addr(FwAddr *address, char **addr, size_t *addr_size) {
     if (internal_addr == NULL) { return false; }
 
     *addr_size = strlen(internal_addr);
-    *addr      = malloc(*addr_size);
+    *addr      = FW_MALLOC(*addr_size, sizeof(**addr));
+    if (!*addr) { return false; }
     memcpy(*addr, internal_addr, *addr_size);
 
     return true;
