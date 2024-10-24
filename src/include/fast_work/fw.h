@@ -33,6 +33,11 @@ typedef struct {
 #define FW_REALLOC(addr, size, elem_size) realloc(addr, size *elem_size)
 #endif // FW_MALLOC
 
+#ifndef FW_FREE
+#include <stdlib.h>
+#define FW_FREE(addr) free(addr)
+#endif // FW_MALLOC
+
 ///
 /// @brief initialize the library
 ///
@@ -296,15 +301,11 @@ bool FwConn_TCP_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t 
     char    buf[FW_BUF_SIZE_RECV_ALL];
     ssize_t bytes_read = recv(conn->sock, buf, sizeof(buf), 0);
 
-    unsigned long argp = 1;
-    ioctlsocket(conn->sock, FIONBIO, &argp);
-
     if (bytes_read != sizeof(buf)) {
         if (bytes_read == SOCKET_ERROR) {
-            int err = WSAGetLastError();
-            if (err != WSAEWOULDBLOCK) { return false; }
-        }
-        if (bytes_read > 0) {
+            FW_FREE(*msg);
+            return false;
+        } else if (bytes_read > 0) {
             if ((*msg_size) + bytes_read > cap) {
                 while ((*msg_size) + bytes_read > cap) { cap <<= 1; }
                 *msg = FW_REALLOC(*msg, cap, sizeof(**msg));
@@ -316,14 +317,9 @@ bool FwConn_TCP_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t 
     }
     while (bytes_read == sizeof(buf)) {
         if (bytes_read == SOCKET_ERROR) {
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK) {
-                break;
-            } else {
-                return false;
-            }
-        }
-        if (bytes_read > 0) {
+            FW_FREE(*msg);
+            return false;
+        } else if (bytes_read > 0) {
             if ((*msg_size) + bytes_read > cap) {
                 while ((*msg_size) + bytes_read > cap) { cap <<= 1; }
                 *msg = FW_REALLOC(*msg, cap, sizeof(**msg));
@@ -332,11 +328,11 @@ bool FwConn_TCP_recv_all_cap(FwConn *conn, char **msg, size_t *msg_size, size_t 
             memcpy((*msg) + *msg_size, buf, bytes_read);
             *msg_size += bytes_read;
         }
+        bool res;
+        if (!FwConn_TCP_check_timeout(conn, &res, 0)) { return false; }
+        if (!res) { break; }
         bytes_read = recv(conn->sock, buf, sizeof(buf), 0);
     }
-
-    argp = 0;
-    ioctlsocket(conn->sock, FIONBIO, &argp);
 
     return true;
 }
